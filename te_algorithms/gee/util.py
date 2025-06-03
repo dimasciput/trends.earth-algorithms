@@ -21,6 +21,8 @@ from . import GEEImageError, GEETaskFailure
 # Google cloud storage bucket for output
 BUCKET = "ldmt"
 
+DRIVE_FOLDER = "ldmt"
+
 # Number of minutes a GEE task is allowed to run before timing out and being
 # cancelled
 TASK_TIMEOUT_MINUTES = 48 * 60
@@ -141,6 +143,7 @@ class gee_task(threading.Thread):
             raise GEETaskFailure(self.task)
 
     def get_urls(self):
+        return []
         @backoff.on_exception(
             backoff.expo,
             requests.exceptions.RequestException,
@@ -175,6 +178,7 @@ class gee_task(threading.Thread):
             return urls
 
     def get_uris(self):
+        return []
         @backoff.on_exception(
             backoff.expo,
             requests.exceptions.RequestException,
@@ -331,15 +335,14 @@ class TEImage:
                 "image": self.image,
                 "description": out_name,
                 "fileNamePrefix": out_name,
-                "bucket": BUCKET,
+                "folder": DRIVE_FOLDER,
                 "maxPixels": maxpixels,
                 "crs": crs,
                 "scale": ee.Number(proj.nominalScale()).getInfo(),
                 "region": get_coords(geojson),
-                "formatOptions": {"cloudOptimized": True},
             }
             t = gee_task(
-                task=ee.batch.Export.image.toCloudStorage(**export),
+                task=ee.batch.Export.image.toDrive(**export),
                 prefix=out_name,
                 logger=logger,
             )
@@ -645,15 +648,14 @@ class TEImageV2:
                     "image": image.image,
                     "description": out_name,
                     "fileNamePrefix": out_name,
-                    "bucket": BUCKET,
+                    "folder": DRIVE_FOLDER,
                     "maxPixels": maxpixels,
                     "crs": crs,
                     "scale": ee.Number(proj.nominalScale()).getInfo(),
                     "region": get_coords(geojson),
-                    "formatOptions": {"cloudOptimized": as_COG},
                 }
                 t = gee_task(
-                    task=ee.batch.Export.image.toCloudStorage(**export),
+                    task=ee.batch.Export.image.toDrive(**export),
                     prefix=out_name,
                     logger=logger,
                     metadata={"datatype": datatype, "bands": image.bands},
