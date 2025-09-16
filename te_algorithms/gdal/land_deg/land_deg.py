@@ -880,7 +880,7 @@ def _process_block_summary(
         if params.prod_mode == ProductivityMode.JRC_5_CLASS_LPD.value:
             band_name = config.JRC_LPD_BAND_NAME
         elif params.prod_mode == ProductivityMode.FAO_WOCAT_5_CLASS_LPD.value:
-            band_name = config.FAO_WOCAT_LPD_BAND_NAME
+            band_name = config.FAO_WOCAT_LP_DEG_BAND_NAME
 
         band_idx = params.in_df.index_for_name(band_name)
         deg_prod5 = in_array[band_idx, :, :]
