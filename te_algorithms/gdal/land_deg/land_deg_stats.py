@@ -35,6 +35,7 @@ def _get_degraded_mask(band_name, masked):
     if band_name in [
         config.SDG_BAND_NAME,
         config.LC_DEG_BAND_NAME,
+        config.FAO_WOCAT_LP_DEG_BAND_NAME,
         config.LC_DEG_COMPARISON_BAND_NAME,
     ]:
         return masked == -1
@@ -60,6 +61,7 @@ def _get_stable_mask(band_name, masked):
         config.LC_DEG_BAND_NAME,
         config.LC_DEG_COMPARISON_BAND_NAME,
         config.SOC_DEG_BAND_NAME,
+        config.FAO_WOCAT_LP_DEG_BAND_NAME,
     ]:
         return masked == 0
     elif band_name in [config.SDG_STATUS_BAND_NAME]:
@@ -81,6 +83,7 @@ def _get_improved_mask(band_name, masked):
         config.SDG_BAND_NAME,
         config.LC_DEG_BAND_NAME,
         config.LC_DEG_COMPARISON_BAND_NAME,
+        config.FAO_WOCAT_LP_DEG_BAND_NAME,
     ]:
         return masked == 1
     elif band_name in [config.SDG_STATUS_BAND_NAME]:
