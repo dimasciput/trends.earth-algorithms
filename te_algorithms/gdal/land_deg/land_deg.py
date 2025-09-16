@@ -862,6 +862,9 @@ def _process_block_summary(
     # given row - cell areas only vary among rows)
     cell_areas = np.repeat(cell_areas_raw, mask.shape[1], axis=1).astype(np.float64)
 
+    deg_prod3 = None
+    deg_prod5 = None
+
     if params.prod_mode == ProductivityMode.TRENDS_EARTH_5_CLASS_LPD.value:
         traj_array = in_array[traj_band_idx, :, :]
         traj_recode = recode_traj(traj_array)
@@ -873,14 +876,8 @@ def _process_block_summary(
 
         deg_prod5 = calc_prod5(traj_recode, state_recode, perf_array)
 
-    elif params.prod_mode in (
-        ProductivityMode.JRC_5_CLASS_LPD.value,
-        ProductivityMode.FAO_WOCAT_5_CLASS_LPD.value,
-    ):
-        if params.prod_mode == ProductivityMode.JRC_5_CLASS_LPD.value:
-            band_name = config.JRC_LPD_BAND_NAME
-        elif params.prod_mode == ProductivityMode.FAO_WOCAT_5_CLASS_LPD.value:
-            band_name = config.FAO_WOCAT_LP_DEG_BAND_NAME
+    elif params.prod_mode == ProductivityMode.JRC_5_CLASS_LPD.value:
+        band_name = config.JRC_LPD_BAND_NAME
 
         band_idx = params.in_df.index_for_name(band_name)
         deg_prod5 = in_array[band_idx, :, :]
@@ -888,11 +885,16 @@ def _process_block_summary(
         # fixed in LPD layer on GEE and missing data values are
         # fixed in LPD layer made by UNCCD for SIDS
         deg_prod5[(deg_prod5 == 0) | (deg_prod5 == 15)] = config.NODATA_VALUE
+    elif params.prod_mode == ProductivityMode.FAO_WOCAT_5_CLASS_LPD.value:
+        band_name = config.FAO_WOCAT_LP_DEG_BAND_NAME
+        band_idx = params.in_df.index_for_name(band_name)
+        deg_prod3 = in_array[band_idx, :, :]
     else:
         raise Exception(f"Unknown productivity mode {params.prod_mode}")
 
-    # Recode deg_prod5 as stable, degraded, improved (deg_prod3)
-    deg_prod3 = prod5_to_prod3(deg_prod5)
+    if not deg_prod3 and deg_prod5:
+        # Recode deg_prod5 as stable, degraded, improved (deg_prod3)
+        deg_prod3 = prod5_to_prod3(deg_prod5)
 
     if "prod" in params.error_recode:
         prod_error_recode = in_array[
