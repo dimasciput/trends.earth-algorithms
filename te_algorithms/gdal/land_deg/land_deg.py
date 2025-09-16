@@ -892,7 +892,7 @@ def _process_block_summary(
     else:
         raise Exception(f"Unknown productivity mode {params.prod_mode}")
 
-    if not deg_prod3 and deg_prod5:
+    if deg_prod3 is None and deg_prod5 is not None:
         # Recode deg_prod5 as stable, degraded, improved (deg_prod3)
         deg_prod3 = prod5_to_prod3(deg_prod5)
 
