@@ -7,6 +7,42 @@ from .util import TEImage
 LAND_COVER_INITIAL_YEAR = 1992
 LAND_COVER_FINAL_YEAR = 2022
 
+# GLAD GLCLU2020 v2 – 30 m annual snapshots (2000/2005/2010/2015/2020)
+# Citation: Potapov et al. 2022 (https://glad.umd.edu/dataset/GLCLUC2020)
+GLAD_LC_AVAILABLE_YEARS = [2000, 2005, 2010, 2015, 2020]
+_GLAD_OCEAN_MASK = "projects/glad/OceanMask"
+_GLAD_LC_ASSET = "projects/glad/GLCLU2020/v2/LCLUC_{year}"
+
+# GLAD GLCLU2020 v2 pixel values (0-255) → UNCCD 7 classes
+# 1=Tree-covered  2=Grassland  3=Cropland  4=Wetland  5=Artificial
+# 6=Other land    7=Water body
+# Full legend: https://storage.googleapis.com/earthenginepartners-hansen/GLCLU2000-2020/v2/legend.xlsx
+def _build_glad_unccd_remap():
+    m = [-32768] * 256         # 0, 255: no data
+    for i in range(1, 25):     # 1-24:   short herbaceous  → Grassland
+        m[i] = 2
+    for i in range(25, 49):    # 25-48:  shrubland         → Grassland
+        m[i] = 2
+    for i in range(49, 73):    # 49-72:  tree-covered      → Tree-covered
+        m[i] = 1
+    for i in range(73, 89):    # 73-88:  flooded/wetland   → Wetland
+        m[i] = 4
+    for i in range(89, 101):   # 89-100: sparse/mixed veg  → Grassland
+        m[i] = 2
+    for i in range(101, 151):  # 101-150: cropland         → Cropland
+        m[i] = 3
+    for i in range(151, 201):  # 151-200: urban/settlement → Artificial
+        m[i] = 5
+    for i in range(201, 221):  # 201-220: water body       → Water body
+        m[i] = 7
+    for i in range(221, 255):  # 221-254: ice/bare         → Other land
+        m[i] = 6
+    return m
+
+
+_GLAD_FROM = list(range(256))
+_GLAD_TO_UNCCD = _build_glad_unccd_remap()
+
 
 def _select_lc(lc, year, logger, fake_data=False):
     try:
@@ -181,6 +217,131 @@ def land_cover(
 
     logger.debug("Leaving land_cover function.")
 
+    return out
+
+
+def _nearest_glad_year(year):
+    """Return the closest available GLAD LC snapshot year."""
+    return min(GLAD_LC_AVAILABLE_YEARS, key=lambda y: abs(y - year))
+
+
+def _load_glad_lc(year, logger):
+    """Load a GLAD GLCLU2020 v2 image with ocean mask applied."""
+    snapped = _nearest_glad_year(year)
+    if snapped != year:
+        logger.warning(
+            f"GLAD LC: year {year} unavailable; using nearest available year {snapped}."
+        )
+    landmask = ee.Image(_GLAD_OCEAN_MASK).lte(1)
+    return ee.Image(_GLAD_LC_ASSET.format(year=snapped)).updateMask(landmask)
+
+
+def land_cover_glad(
+    year_initial,
+    year_final,
+    trans_matrix,
+    esa_to_custom_nesting,  # parent legend used for UNCCD class codes / multiplier
+    ipcc_nesting,
+    additional_years,
+    logger,
+    annual_lc=False,
+):
+    """
+    Calculate land cover indicator using the GLAD GLCLU2020 v2 30 m dataset.
+
+    Available years: 2000, 2005, 2010, 2015, 2020. Requested years are snapped
+    to the nearest available snapshot.  GLAD pixel values (0-255) are remapped
+    directly to UNCCD 7 classes via _GLAD_TO_UNCCD, bypassing the ESA CCI
+    nesting; esa_to_custom_nesting is only used to derive UNCCD class codes
+    and the transition multiplier.
+    """
+    logger.debug("Entering land_cover_glad function.")
+
+    lc_initial = _load_glad_lc(year_initial, logger)
+    lc_final = _load_glad_lc(year_final, logger)
+
+    # GLAD raw → UNCCD 7 classes
+    lc_bl = lc_initial.remap(_GLAD_FROM, _GLAD_TO_UNCCD)
+    lc_tg = lc_final.remap(_GLAD_FROM, _GLAD_TO_UNCCD)
+
+    # UNCCD codes → 1-based positional indices (needed by trans_matrix)
+    class_codes = sorted([c.code for c in esa_to_custom_nesting.parent.key])
+    class_positions = list(range(1, len(class_codes) + 1))
+    lc_bl_pos = lc_bl.remap(class_codes, class_positions)
+    lc_tg_pos = lc_tg.remap(class_codes, class_positions)
+
+    lc_tr = lc_bl_pos.multiply(esa_to_custom_nesting.parent.get_multiplier()).add(lc_tg_pos)
+    lc_dg = lc_tr.remap(trans_matrix.get_list()[0], trans_matrix.get_list()[1]).rename(
+        "Land_cover_degradation"
+    )
+    lc_tr = lc_tr.remap(
+        trans_matrix.get_persistence_list()[0], trans_matrix.get_persistence_list()[1]
+    ).rename(f"Land_cover_transitions_{year_initial}-{year_final}")
+
+    lc_baseline = lc_bl.rename(f"Land_cover_{year_initial}")
+    lc_target = lc_tg.rename(f"Land_cover_{year_final}")
+
+    out = TEImage(
+        lc_dg.addBands(lc_baseline).addBands(lc_target).addBands(lc_tr),
+        [
+            BandInfo(
+                "Land cover (degradation)",
+                add_to_map=True,
+                metadata={
+                    "year_initial": year_initial,
+                    "year_final": year_final,
+                    "trans_matrix": trans_matrix.dumps(),
+                    "nesting": ipcc_nesting.dumps(),
+                    "lc_source": "GLAD GLCLU2020 v2",
+                },
+            ),
+            BandInfo(
+                "Land cover (GLAD classes)",
+                metadata={"year": year_initial, "lc_source": "GLAD GLCLU2020 v2"},
+            ),
+            BandInfo(
+                "Land cover (GLAD classes)",
+                metadata={"year": year_final, "lc_source": "GLAD GLCLU2020 v2"},
+            ),
+            BandInfo(
+                "Land cover transitions",
+                add_to_map=True,
+                metadata={
+                    "year_initial": year_initial,
+                    "year_final": year_final,
+                    "nesting": ipcc_nesting.dumps(),
+                    "lc_source": "GLAD GLCLU2020 v2",
+                },
+            ),
+        ],
+    )
+
+    # Additional "Land cover" bands (remapped to UNCCD) for each requested year
+    if annual_lc:
+        years = list(range(year_initial, year_final + 1)) + additional_years
+    else:
+        years = [year_initial, year_final] + additional_years
+    years = sorted(set(years))
+
+    lc_imgs = [_load_glad_lc(y, logger).remap(_GLAD_FROM, _GLAD_TO_UNCCD) for y in years]
+    lc_remapped = lc_imgs[0]
+    for img in lc_imgs[1:]:
+        lc_remapped = lc_remapped.addBands(img)
+    lc_remapped = lc_remapped.rename([f"Land_cover_{y}" for y in years])
+
+    d_lc = [
+        BandInfo(
+            "Land cover",
+            add_to_map=(y in (year_initial, year_final)),
+            metadata={"year": y, "nesting": ipcc_nesting.dumps(), "lc_source": "GLAD GLCLU2020 v2"},
+        )
+        for y in years
+    ]
+    out.addBands(lc_remapped, d_lc)
+
+    out.image = out.image.unmask(-32768).int16()
+
+    logger.debug("Leaving land_cover_glad function.")
     return out
 
 
